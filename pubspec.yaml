@@ -1,7 +1,7 @@
 name: ktools
-description: A command-line tool for generating classes from assets
+description: A command-line tool for generating Dart code from assets and translations.
 repository: https://github.com/kalucky0/ktools
-version: 1.0.0
+version: 1.0.1
 
 environment:
   sdk: ^3.3.1
