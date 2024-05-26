@@ -18,7 +18,7 @@ First, add KTools to your `pubspec.yaml`:
 
 ```yaml
 dev_dependencies:
-  ktools: ^1.0.0
+  ktools: ^1.1.0
 ```
 
 Then, run the following command to generate code:
