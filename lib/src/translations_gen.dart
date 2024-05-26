@@ -9,12 +9,16 @@ class Translation {
   final String category;
   final String key;
   final List<String?> vars;
+  final bool isGendered;
+  final bool isPlural;
 
   const Translation(
     this.category,
     this.key,
-    this.vars,
-  );
+    this.vars, [
+    this.isGendered = false,
+    this.isPlural = false,
+  ]);
 }
 
 Future<void> generateTranslations(Config config) async {
@@ -40,7 +44,22 @@ List<Translation> _getKeys(Map<String, dynamic> json) {
   for (var category in json.keys) {
     if (json[category] is Map) {
       for (var key in json[category].keys) {
-        keys.add(Translation(category, key, _getVars(json[category][key])));
+        if (json[category][key] is Map) {
+          final trKeys = json[category][key].keys;
+          final vars = <String>{};
+          for (final k in trKeys) {
+            vars.addAll(_getVars(json[category][key][k]));
+          }
+
+          bool isGendered = ['male', 'female'].any(trKeys.contains);
+          bool isPlural = ['one', 'two' 'few', 'many'].any(trKeys.contains);
+
+          keys.add(
+            Translation(category, key, vars.toList(), isGendered, isPlural),
+          );
+        } else if (json[category][key] is String) {
+          keys.add(Translation(category, key, _getVars(json[category][key])));
+        }
       }
     } else if (json[category] is String) {
       final parts = category.split('.');
@@ -82,17 +101,27 @@ Future<bool> _verifyFiles(List<FileSystemEntity> files) async {
     for (final key in json.keys) {
       if (json[key] is Map) {
         for (final subKey in json[key].keys) {
-          if (json[key][subKey].contains('{}')) {
-            print('Missing variable in $key.$subKey in ${file.path}');
-            isSuccessful = false;
+          if (json[key][subKey] is String) {
+            isSuccessful = _checkForEmptyVars(
+              json[key][subKey],
+              '$key.$subKey',
+              file.path,
+            );
+            fileKeys.add('$key.$subKey');
+          } else {
+            for (final subSubKey in json[key][subKey].keys) {
+              isSuccessful = _checkForEmptyVars(
+                json[key][subKey][subSubKey],
+                '$key.$subKey.$subSubKey',
+                file.path,
+              );
+              fileKeys.add('$key.$subKey.$subSubKey');
+            }
+            fileKeys.add('$key.$subKey');
           }
-          fileKeys.add('$key.$subKey');
         }
       } else if (json[key] is String) {
-        if (json[key].contains('{}')) {
-          print('Missing variable in $key in ${file.path}');
-          isSuccessful = false;
-        }
+        isSuccessful = _checkForEmptyVars(json[key], key, file.path);
         fileKeys.add(key);
       }
     }
@@ -105,6 +134,14 @@ Future<bool> _verifyFiles(List<FileSystemEntity> files) async {
   }
 
   return isSuccessful;
+}
+
+bool _checkForEmptyVars(String line, String key, String file) {
+  if (line.contains('{}')) {
+    print('Missing variable in $key in $file');
+    return false;
+  }
+  return true;
 }
 
 String _generateAll(List<Translation> tr) {
@@ -143,17 +180,52 @@ String _generateClass(List<Translation> tr) {
     Constructor('_${name}Tr')..constant = true,
   );
   for (final t in tr) {
-    final params = t.vars.map(
-      (e) => Parameter('required String', e!)..named = true,
+    final params = [];
+    if (t.isGendered) {
+      params.add(
+        Parameter('String?', 'gender')..named = true,
+      );
+    }
+    if (t.isPlural) {
+      params.add(
+        Parameter('num', 'value'),
+      );
+    }
+    params.addAll(
+      t.vars.map((e) => Parameter('required String', e!)..named = true),
     );
-    final args = ', namedArgs: {${t.vars.map((e) {
-      return '\'$e\': $e';
-    }).join(', ')}}';
+
+    final args = t.vars.map((e) => '\'$e\': $e').join(', ');
+    String body = '';
+    if (t.isPlural) {
+      body = 'plural(';
+      body += '\'${t.category}.${t.key}\'';
+      body += ', value';
+      if (t.vars.isNotEmpty) {
+        body += ', namedArgs: {$args},\n';
+        body = 'return $body';
+      }
+      body += ');';
+    } else if (t.isGendered) {
+      body = 'tr(';
+      body += '\'${t.category}.${t.key}\'';
+      body += ', gender: gender';
+      if (t.vars.isNotEmpty) {
+        body += ', namedArgs: {$args},\n';
+        body = 'return $body';
+      }
+      body += ');';
+    } else if (t.vars.isNotEmpty) {
+      body = 'return tr(\'${t.category}.${t.key}\', namedArgs: {$args},\n);';
+    } else {
+      body = 'tr(\'${t.category}.${t.key}\');';
+    }
+
     builder.methods.add(
       Method('String', t.key)
-        ..getter = t.vars.isEmpty
-        ..parameters.addAll(params)
-        ..body = 'tr(\'${t.category}.${t.key}\'${t.vars.isEmpty ? '' : args});',
+        ..getter = params.isEmpty
+        ..parameters.addAll(Iterable.castFrom(params))
+        ..body = body,
     );
   }
   return builder.build();
